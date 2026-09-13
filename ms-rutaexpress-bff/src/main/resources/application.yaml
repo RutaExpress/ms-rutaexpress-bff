@@ -1,0 +1,15 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ms-rutaexpress-bff
+  
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # URL para validar la firma del token (Reemplaza con tu Tenant ID real si es diferente)
+          issuer-uri: https://login.microsoftonline.com/70d90397-3549-4694-8a16-70f45020c6fa/v2.0
+          # Valida que el token vaya dirigido a tu aplicación (Tu Client ID)
+          audiences: 5421b650-58dc-4ae6-863e-a34f55e0177a
