@@ -10,6 +10,9 @@ jobs:
   build-and-test:
     name: Build & Test Spring Boot BFF
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./ms-rutaexpress-bff
 
     steps:
       - name: Checkout Code
@@ -21,6 +24,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
+          cache-dependency-path: './ms-rutaexpress-bff/pom.xml'
 
       - name: Build with Maven
         run: mvn clean package -DskipTests
@@ -32,6 +36,9 @@ jobs:
     name: Build Docker Image
     needs: build-and-test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./ms-rutaexpress-bff
 
     steps:
       - name: Checkout Code
