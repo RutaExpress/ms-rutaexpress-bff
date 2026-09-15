@@ -1,7 +1,6 @@
 package com.rutaexpress.ms_rutaexpress_bff.config;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.security.oauth2.resource.OAuth2ResourceServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -37,6 +36,12 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins}")
     private String allowedOriginsRaw;
 
+    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
+    private String issuerUri;
+
+    @Value("${spring.security.oauth2.resourceserver.jwt.audiences}")
+    private String audiencesRaw;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -53,13 +58,16 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // FIX: JwtDecoder explícito que valida issuer + audiencia correctamente.
-    // Spring Boot 3.4 tiene un bug conocido con la propiedad "audiences" cuando
-    // se define como escalar en YAML o se sobreescribe por env vars.
+    // FIX: JwtDecoder explícito que valida issuer + audiencia de forma manual.
+    // Spring Boot 3.4+/4.x tiene comportamiento inconsistente con la validación
+    // automática de "audiences" cuando se define como escalar en YAML o por env var.
     @Bean
-    public JwtDecoder jwtDecoder(OAuth2ResourceServerProperties properties) {
-        String issuerUri = properties.getJwt().getIssuerUri();
-        var audiences = properties.getJwt().getAudiences();
+    public JwtDecoder jwtDecoder() {
+        // Parsear audiencias (pueden venir separadas por coma desde env var)
+        List<String> audiences = Arrays.stream(audiencesRaw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
 
         NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
 
@@ -78,7 +86,6 @@ public class SecurityConfig {
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Parsea orígenes separados por coma desde la variable de entorno
         List<String> origins = Arrays.stream(allowedOriginsRaw.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
