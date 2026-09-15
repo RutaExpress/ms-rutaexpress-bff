@@ -10,13 +10,15 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
-import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
-import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -58,27 +60,39 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // FIX: JwtDecoder explícito que valida issuer + audiencia de forma manual.
-    // Spring Boot 3.4+/4.x tiene comportamiento inconsistente con la validación
-    // automática de "audiences" cuando se define como escalar en YAML o por env var.
+    // FIX: JwtDecoder explicito con validador de audiencia robusto.
+    // Usa getClaimAsStringList para manejar aud como String o List<String>.
     @Bean
     public JwtDecoder jwtDecoder() {
-        // Parsear audiencias (pueden venir separadas por coma desde env var)
+        NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
+
         List<String> audiences = Arrays.stream(audiencesRaw.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toList());
 
-        NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
+        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> {
+            List<String> tokenAudiences = jwt.getClaimAsStringList(JwtClaimNames.AUD);
+            if (tokenAudiences == null || tokenAudiences.isEmpty()) {
+                return OAuth2TokenValidatorResult.failure(
+                        new OAuth2Error("invalid_token", "missing aud claim", null));
+            }
+            boolean matches = tokenAudiences.stream().anyMatch(audiences::contains);
+            if (!matches) {
+                return OAuth2TokenValidatorResult.failure(
+                        new OAuth2Error("invalid_token",
+                                "aud mismatch. token=" + tokenAudiences + " expected=" + audiences, null));
+            }
+            return OAuth2TokenValidatorResult.success();
+        };
 
-        OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
-        OAuth2TokenValidator<Jwt> withAudience = new DelegatingOAuth2TokenValidator<>(
-                withIssuer,
-                new JwtClaimValidator<List<String>>(JwtClaimNames.AUD,
-                        aud -> aud != null && aud.stream().anyMatch(audiences::contains))
+        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
+                new JwtTimestampValidator(),
+                new JwtIssuerValidator(issuerUri),
+                audienceValidator
         );
 
-        jwtDecoder.setJwtValidator(withAudience);
+        jwtDecoder.setJwtValidator(validator);
         return jwtDecoder;
     }
 
