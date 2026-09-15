@@ -10,11 +10,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
 import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
@@ -41,11 +38,10 @@ public class SecurityConfig {
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
     private String issuerUri;
 
-    @Value("${spring.security.oauth2.resourceserver.jwt.audiences}")
-    private String audiencesRaw;
-
+    // Inyectamos el JwtDecoder EXPLÍCITAMENTE en el filterChain.
+    // Esto evita que Spring Boot use su decoder autoconfigurado (que valida audiences del YAML).
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtDecoder jwtDecoder) throws Exception {
         http
             .cors(Customizer.withDefaults())
             .csrf(csrf -> csrf.disable())
@@ -55,41 +51,23 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthConverter()))
+                .jwt(jwt -> jwt
+                    .decoder(jwtDecoder)                      // ← decoder explícito
+                    .jwtAuthenticationConverter(jwtAuthConverter())
+                )
             );
         return http.build();
     }
 
-    // FIX: JwtDecoder explicito con validador de audiencia robusto.
-    // Usa getClaimAsStringList para manejar aud como String o List<String>.
     @Bean
     public JwtDecoder jwtDecoder() {
         NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
 
-        List<String> audiences = Arrays.stream(audiencesRaw.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
-
-        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> {
-            List<String> tokenAudiences = jwt.getClaimAsStringList(JwtClaimNames.AUD);
-            if (tokenAudiences == null || tokenAudiences.isEmpty()) {
-                return OAuth2TokenValidatorResult.failure(
-                        new OAuth2Error("invalid_token", "missing aud claim", null));
-            }
-            boolean matches = tokenAudiences.stream().anyMatch(audiences::contains);
-            if (!matches) {
-                return OAuth2TokenValidatorResult.failure(
-                        new OAuth2Error("invalid_token",
-                                "aud mismatch. token=" + tokenAudiences + " expected=" + audiences, null));
-            }
-            return OAuth2TokenValidatorResult.success();
-        };
-
+        // Solo validamos firma (implícita), timestamp e issuer.
+        // La audiencia la valida API Gateway con su JWT Authorizer (defensa en profundidad).
         OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
                 new JwtTimestampValidator(),
-                new JwtIssuerValidator(issuerUri),
-                audienceValidator
+                new JwtIssuerValidator(issuerUri)
         );
 
         jwtDecoder.setJwtValidator(validator);
