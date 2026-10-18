@@ -1,21 +1,23 @@
 server:
-  port: 8082
+  port: ${PORT:8082}
 
 spring:
   application:
     name: ms-rutaexpress-bff
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: https://login.microsoftonline.com/70d90397-3549-4694-8a16-70f45020c6fa/v2.0
-          # audiences: se valida en API Gateway (JWT Authorizer).
-          # El BFF solo valida firma, issuer y expiración.
+# JWT de Microsoft Entra ID (token v2). Defaults = tenant y app RutaExpress (no son secretos)
+security:
+  jwt:
+    issuer-uri: ${JWT_ISSUER_URI:https://login.microsoftonline.com/70d90397-3549-4694-8a16-70f45020c6fa/v2.0}
+    audience: ${JWT_AUDIENCE:5421b650-58dc-4ae6-863e-a34f55e0177a}   # vacío = no validar audiencia
+
+# Microservicios a los que llama el BFF (en Docker: http://shipments:8081)
+services:
+  shipments-url: ${SHIPMENTS_URL:http://localhost:8081}
 
 app:
   cors:
-    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:4200}
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:4200}   # en la nube el CORS lo hace el API Gateway
 
 management:
   endpoints:
@@ -25,3 +27,7 @@ management:
   endpoint:
     health:
       show-details: never
+
+logging:
+  file:
+    name: logs/bff.log

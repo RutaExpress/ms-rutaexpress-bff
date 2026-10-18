@@ -8,9 +8,12 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
@@ -23,90 +26,99 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
-import java.util.stream.Collectors;
 
+// Seguridad del BFF: valida el JWT de Entra ID (2.ª validación tras el API Gateway) y mapea los roles
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    @Value("${app.cors.allowed-origins}")
-    private String allowedOriginsRaw;
+    private final String issuerUri;
+    private final String audience;
+    private final String allowedOriginsRaw;
 
-    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
-    private String issuerUri;
+    public SecurityConfig(@Value("${security.jwt.issuer-uri}") String issuerUri,
+                          @Value("${security.jwt.audience:}") String audience,
+                          @Value("${app.cors.allowed-origins}") String allowedOriginsRaw) {
+        this.issuerUri = issuerUri;
+        this.audience = audience;
+        this.allowedOriginsRaw = allowedOriginsRaw;
+    }
 
-    // Inyectamos el JwtDecoder EXPLÍCITAMENTE en el filterChain.
-    // Esto evita que Spring Boot use su decoder autoconfigurado (que valida audiences del YAML).
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtDecoder jwtDecoder) throws Exception {
         http
             .cors(Customizer.withDefaults())
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf.disable())                      // API stateless con Bearer: no usa cookies
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/public/**", "/actuator/health").permitAll()
-                .anyRequest().authenticated()
+                .anyRequest().authenticated()                  // sin token o token inválido -> 401
             )
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt
-                    .decoder(jwtDecoder)                      // ← decoder explícito
+                    .decoder(jwtDecoder)
                     .jwtAuthenticationConverter(jwtAuthConverter())
                 )
             );
         return http.build();
     }
 
+    // Valida firma (JWKS de Entra ID), expiración, issuer y audiencia
     @Bean
     public JwtDecoder jwtDecoder() {
-        NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
-
-        // Solo validamos firma (implícita), timestamp e issuer.
-        // La audiencia la valida API Gateway con su JWT Authorizer (defensa en profundidad).
-        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
-                new JwtTimestampValidator(),
-                new JwtIssuerValidator(issuerUri)
-        );
-
-        jwtDecoder.setJwtValidator(validator);
-        return jwtDecoder;
+        NimbusJwtDecoder decoder = JwtDecoders.fromIssuerLocation(issuerUri);
+        List<OAuth2TokenValidator<Jwt>> validators = new ArrayList<>();
+        validators.add(new JwtTimestampValidator());
+        validators.add(new JwtIssuerValidator(issuerUri));
+        if (!audience.isBlank()) {
+            validators.add(audienceValidator());
+        }
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(validators));
+        return decoder;
     }
 
-    @Bean
-    CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-
-        List<String> origins = Arrays.stream(allowedOriginsRaw.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
-
-        configuration.setAllowedOrigins(origins);
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
-        configuration.setAllowCredentials(true);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
+    // aud puede venir como texto o lista: getAudience() siempre devuelve lista
+    private OAuth2TokenValidator<Jwt> audienceValidator() {
+        return jwt -> jwt.getAudience() != null && jwt.getAudience().contains(audience)
+                ? OAuth2TokenValidatorResult.success()
+                : OAuth2TokenValidatorResult.failure(
+                        new OAuth2Error("invalid_token", "La audiencia del token no corresponde a RutaExpress", null));
     }
 
+    // Claim "roles" (ROLE_CLIENTE, ROLE_OPERADOR, ROLE_ADMIN, ROLE_AUDITOR) -> autoridades.
+    // Sin roles no hay autoridades: mínimo privilegio (403 en endpoints con rol)
     @Bean
     public JwtAuthenticationConverter jwtAuthConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-
         converter.setJwtGrantedAuthoritiesConverter(jwt -> {
             List<String> roles = jwt.getClaimAsStringList("roles");
-            if (roles == null || roles.isEmpty()) {
-                return List.of(new SimpleGrantedAuthority("ROLE_CLIENTE"));
+            Collection<GrantedAuthority> authorities = new ArrayList<>();
+            if (roles != null) {
+                roles.forEach(role -> authorities.add(new SimpleGrantedAuthority(role)));
             }
-            return roles.stream()
-                    .map(SimpleGrantedAuthority::new)
-                    .collect(Collectors.toList());
+            return authorities;
         });
-
         return converter;
+    }
+
+    // CORS para desarrollo local (front en localhost:4200 directo al BFF)
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.stream(allowedOriginsRaw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList());
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setAllowCredentials(false);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 }
