@@ -1,6 +1,6 @@
-package com.rutaexpress.ms_rutaexpress_bff.adapter.in.rest;
+package com.rutaexpress.ms_rutaexpress_bff.controller;
 
-import com.rutaexpress.ms_rutaexpress_bff.adapter.in.rest.dto.MeResponse;
+import com.rutaexpress.ms_rutaexpress_bff.dto.MeResponse;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;

@@ -1,4 +1,4 @@
-package com.rutaexpress.ms_rutaexpress_bff.adapter.in.rest.exception;
+package com.rutaexpress.ms_rutaexpress_bff.exception;
 
 // El envío no existe o no pertenece al cliente -> 404 (no se revela que existe)
 public class ShipmentNotFoundException extends RuntimeException {
