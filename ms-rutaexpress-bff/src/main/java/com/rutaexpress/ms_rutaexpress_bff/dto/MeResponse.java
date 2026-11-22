@@ -1,4 +1,4 @@
-package com.rutaexpress.ms_rutaexpress_bff.adapter.in.rest.dto;
+package com.rutaexpress.ms_rutaexpress_bff.dto;
 
 import java.util.List;
 

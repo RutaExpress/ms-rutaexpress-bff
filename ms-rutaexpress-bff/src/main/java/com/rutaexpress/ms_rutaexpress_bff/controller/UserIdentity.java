@@ -1,4 +1,4 @@
-package com.rutaexpress.ms_rutaexpress_bff.adapter.in.rest;
+package com.rutaexpress.ms_rutaexpress_bff.controller;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;

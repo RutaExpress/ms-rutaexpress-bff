@@ -1,4 +1,4 @@
-package com.rutaexpress.ms_rutaexpress_bff.port.out;
+package com.rutaexpress.ms_rutaexpress_bff.dto;
 
 // Envío tal como lo responde shipments (contrato). Fechas como texto: el BFF no las procesa
 public record ShipmentView(

@@ -11,9 +11,12 @@ security:
     issuer-uri: ${JWT_ISSUER_URI:https://login.microsoftonline.com/70d90397-3549-4694-8a16-70f45020c6fa/v2.0}
     audience: ${JWT_AUDIENCE:5421b650-58dc-4ae6-863e-a34f55e0177a}   # vacío = no validar audiencia
 
-# Microservicios a los que llama el BFF (en Docker: http://shipments:8081)
+# Microservicios a los que llama el BFF (en Docker: http://shipments:8081, http://catalog:8083...)
 services:
   shipments-url: ${SHIPMENTS_URL:http://localhost:8081}
+  catalog-url: ${CATALOG_URL:http://localhost:8083}
+  report-url: ${REPORT_URL:http://localhost:8086}
+  audit-url: ${AUDIT_URL:http://localhost:8087}
 
 app:
   cors:
